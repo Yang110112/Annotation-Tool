@@ -17,7 +17,7 @@ from tkinter import ttk, messagebox
 
 from pynput import keyboard, mouse
 
-import mima  # 原密码模块，不做任何修改
+import mima, shutdown  # 原密码模块，不做任何修改
 
 # ====== 需要你确认的配置 ======
 # 原主脚本的文件名（不带 .py）。如果你的主脚本不叫 main.py，改这里
@@ -106,8 +106,13 @@ def password_dialog():
             result["tries"] += 1
             left = mima.MAX_RETRY - result["tries"]
             if left <= 0:
-                messagebox.showerror("解锁失败", "⛔ 次数用尽，解锁失败，程序退出")
+                messagebox.showerror("解锁失败", "⛔ 次数用尽，解锁失败，即将关机！")
                 root.destroy()
+                # 调用shutdown模块的关机函数
+                import shutdown
+                shutdown.shutdown1234()
+                return False
+
             else:
                 err.config(text=f"❌ 密码错误，还剩 {left} 次机会")
                 info.set(f"请输入密码（剩余尝试次数：{left}）")
