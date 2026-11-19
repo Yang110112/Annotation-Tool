@@ -1,0 +1,16 @@
+{
+  "auto": {
+    "type": "mouse",
+    "code": "right",
+    "name": "右键"
+  },
+  "replay": {
+    "type": "mouse",
+    "code": "wheel_any",
+    "name": "滚轮（上下均可）"
+  },
+  "keywords": [
+    "单人转写标注"
+  ],
+  "suppress": true
+}
