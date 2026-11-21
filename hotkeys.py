@@ -17,6 +17,7 @@ WM_XBUTTONUP = 0x020C
 KEY_DOWN_MSGS = (0x0100, 0x0104)   # WM_KEYDOWN, WM_SYSKEYDOWN
 KEY_UP_MSGS = (0x0101, 0x0105)     # WM_KEYUP, WM_SYSKEYUP
 VK_ESCAPE = 0x1B
+VK_TAB = 0x09                      # Tab 键：固定用于切换倍数
 
 
 class HotkeyManager:
@@ -146,6 +147,19 @@ class HotkeyManager:
                 self.finish_record({"type": "key", "code": vk, "name": self.key_name(data)})
             return True
         if not self.enabled:
+            return True
+
+        # Tab 键：切换倍数（固定键，只在标注页内生效，其他程序里 Tab 正常使用）
+        if vk == VK_TAB:
+            if not down:
+                self.held.discard(vk)
+            if not in_target_window(show=down):
+                return True
+            if down and vk not in self.held:   # 防止长按连续触发
+                self.held.add(vk)
+                actions.start_speed("触发键")
+            if self.suppress:
+                self.keyboard_listener.suppress_event()
             return True
 
         action = self.match("key", (vk,))

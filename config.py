@@ -48,4 +48,12 @@ BAR_MIN_HEIGHT = 30           # 静音柱竖线至少多少像素高
 MIN_COLUMN_PIXELS = 3         # 一列里波形像素不少于多少个，才算"有音频"
 FIT_TOLERANCE = 3             # 偏差不超过这个像素数就不拖
 FIT_MAX_DRAG = 300            # 单次拖动超过这个像素数视为识别异常，不拖动
-BAR_GAP = 2                   # 贴合后，静音柱与音频最边缘之间保留的像素
+BAR_GAP = 3                   # 贴合后，静音柱与音频最边缘之间保留的像素
+EDGE_AMP_RATIO_L = 0.2        # 左边缘：列高需达到"参考列高"的这个比例
+EDGE_AMP_RATIO_R = 0.2  
+EDGE_TAIL_RATIO = 0.05        # 新增：往外延伸时的低阈值（参考列高的比例）
+EDGE_TAIL_GAP = 6             # 新增：延伸时允许的最大间隔列数      # 右边缘：同上
+EDGE_REF_PERCENTILE = 90      # 新增：参考列高取有声列高度的第几百分位
+EDGE_MIN_RUN = 4              # 需要连续多少列都达标，才算音频边缘（过滤又窄又高的毛刺）
+FIT_GRAB = "edge"             # 拖动时抓取的位置："edge" = 框左右边缘；"bar" = 静音柱本身
+FIT_MAX_ROUNDS = 3            # 最多测量并修正几轮（每轮拖完会重新截图检查静音柱是否贴合）
