@@ -28,6 +28,8 @@ class HotkeyManager:
         self.enabled = False          # 是否在监听
         self.recording = None         # 正在录入哪个功能："auto" / "replay" / None
         self.held = set()             # 键盘按住状态，防止长按连续触发
+        self.sup_mouse = set()        # 按下时被拦截的鼠标键，抬起时必须同样拦截
+        self.sup_keys = set()         # 按下时被拦截的键盘键，抬起时必须同样拦截
         # 钩子一直挂着（录入按键也需要），是否触发由 self.enabled 控制
         self.mouse_listener = mouse.Listener(win32_event_filter=self.on_mouse)
         self.keyboard_listener = keyboard.Listener(win32_event_filter=self.on_key)
@@ -108,6 +110,14 @@ class HotkeyManager:
                 code = codes[0]
                 self.finish_record({"type": "mouse", "code": code, "name": MOUSE_NAMES[code]})
             return True
+
+        # 抬起：按下时被拦截过，抬起就同样拦截（成对处理），不再判断窗口
+        if kind == "up":
+            if codes[0] in self.sup_mouse:
+                self.sup_mouse.discard(codes[0])
+                self.mouse_listener.suppress_event()
+            return True
+
         if not self.enabled:
             return True
 
@@ -117,9 +127,10 @@ class HotkeyManager:
         # 不在标注页：直接放行，其他程序里该按键功能完全正常
         if not in_target_window(show=(kind == "down")):
             return True
-        if kind in ("down", "wheel"):
-            self.trigger(action, kind == "wheel")
+        self.trigger(action, kind == "wheel")
         if self.suppress:
+            if kind == "down":
+                self.sup_mouse.add(codes[0])
             self.mouse_listener.suppress_event()
         return True
 
@@ -146,32 +157,39 @@ class HotkeyManager:
             if down:
                 self.finish_record({"type": "key", "code": vk, "name": self.key_name(data)})
             return True
+
+        # 抬起：始终清除按住状态；按下时被拦截过的，抬起同样拦截
+        if not down:
+            self.held.discard(vk)
+            if vk in self.sup_keys:
+                self.sup_keys.discard(vk)
+                self.keyboard_listener.suppress_event()
+            return True
+
         if not self.enabled:
             return True
 
         # Tab 键：切换倍数（固定键，只在标注页内生效，其他程序里 Tab 正常使用）
         if vk == VK_TAB:
-            if not down:
-                self.held.discard(vk)
-            if not in_target_window(show=down):
+            if not in_target_window(show=True):
                 return True
-            if down and vk not in self.held:   # 防止长按连续触发
+            if vk not in self.held:   # 防止长按连续触发
                 self.held.add(vk)
                 actions.start_speed("触发键")
             if self.suppress:
+                self.sup_keys.add(vk)
                 self.keyboard_listener.suppress_event()
             return True
 
         action = self.match("key", (vk,))
         if not action:
             return True
-        if not down:
-            self.held.discard(vk)
-        if not in_target_window(show=down):
+        if not in_target_window(show=True):
             return True
-        if down and vk not in self.held:
+        if vk not in self.held:
             self.held.add(vk)
             self.trigger(action, False)
         if self.suppress:
+            self.sup_keys.add(vk)
             self.keyboard_listener.suppress_event()
         return True

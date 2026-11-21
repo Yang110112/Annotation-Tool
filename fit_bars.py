@@ -54,6 +54,7 @@ def _find_edge(counts, order, thr):
             run = 0
     return None
 
+
 def _extend_edge(counts, order, edge, thr, max_gap):
     """
     从主体边缘 edge 往外（order 的前面方向）延伸：
@@ -119,7 +120,8 @@ def analyze_wave(img):
     audio_r = _find_edge(counts, cols[::-1], thr_r)
     if audio_l is None or audio_r is None or audio_l >= audio_r:
         return None, f"没找到有效音频边缘（最大列高={peak}，参考列高={ref}）"
-        # 往外延伸，保留渐强 / 渐弱的弱音
+
+    # 往外延伸，保留渐强 / 渐弱的弱音
     thr_tail = max(cfg.MIN_COLUMN_PIXELS, ref * cfg.EDGE_TAIL_RATIO)
     audio_l = _extend_edge(counts, cols, audio_l, thr_tail, cfg.EDGE_TAIL_GAP)
     audio_r = _extend_edge(counts, cols[::-1], audio_r, thr_tail, cfg.EDGE_TAIL_GAP)
@@ -186,10 +188,13 @@ def fit_silence_bars():
                 if abs(dx) > cfg.FIT_MAX_DRAG:
                     print(f"⚠️ 偏差 {dx}px 过大，疑似识别异常，已跳过")
                     continue
-                pyautogui.moveTo(grab_x, center_y)
-                pyautogui.mouseDown()
-                pyautogui.moveTo(grab_x + dx, center_y, duration=0.2)
-                pyautogui.mouseUp()
+                # 无论拖动是否出错，都保证松开左键，避免鼠标一直处于按下状态
+                try:
+                    pyautogui.moveTo(grab_x, center_y)
+                    pyautogui.mouseDown()
+                    pyautogui.moveTo(grab_x + dx, center_y, duration=0.2)
+                finally:
+                    pyautogui.mouseUp()
                 time.sleep(0.1)
 
     print("⚠️ 静音柱贴合：达到最大轮数仍有偏差，请查看日志，必要时把 FIT_GRAB 改成 \"bar\"")
