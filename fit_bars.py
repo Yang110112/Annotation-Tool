@@ -27,10 +27,7 @@ def _is_wave(p):
 
 
 def _reference_height(counts):
-    """
-    参考列高：所有"有声列"（列高 >= MIN_COLUMN_PIXELS）的高度，取百分位数。
-    比直接取最大值稳定，单个尖峰不会把阈值拉高。
-    """
+    """参考列高：所有"有声列"高度的百分位数，比直接取最大值稳定。"""
     active = sorted(v for v in counts.values() if v >= cfg.MIN_COLUMN_PIXELS)
     if not active:
         return 0
@@ -39,72 +36,63 @@ def _reference_height(counts):
     return active[idx]
 
 
-def _find_edge(counts, order, thr):
+def _noise_level(counts):
+    """底噪高度：所有列高排序后取第 NOISE_PERCENTILE 百分位"""
+    vals = sorted(counts.values())
+    idx = int(len(vals) * cfg.NOISE_PERCENTILE / 100)
+    return vals[min(idx, len(vals) - 1)]
+
+
+def _find_edge_rise(counts, order, thr_low, thr_high, window):
     """
-    在 order（列的遍历顺序）里找第一段"连续 EDGE_MIN_RUN 列、列高都 >= thr"的位置，
-    返回这一段最靠外的那一列（即音频边缘）；找不到返回 None。
+    找音频边缘：从 order 方向扫描，找第一个满足下面两条的位置：
+    1) 从该列起连续 EDGE_MIN_RUN 列、列高都 >= thr_low；
+    2) 从该列起 window 列之内，列高至少有一列 >= thr_high（连着强音）。
+    孤立的底噪、细杂线达不到强音，会被跳过。找不到返回 None。
     """
-    run = 0
-    for i, x in enumerate(order):
-        if counts[x] >= thr:
-            run += 1
-            if run >= cfg.EDGE_MIN_RUN:
-                return order[i - run + 1]   # 这一段的起点（遍历方向上最先出现的那列）
-        else:
-            run = 0
+    n = len(order)
+    for i in range(n):
+        if counts[order[i]] < thr_low:
+            continue
+        seg = order[i:i + cfg.EDGE_MIN_RUN]
+        if len(seg) < cfg.EDGE_MIN_RUN or any(counts[x] < thr_low for x in seg):
+            continue
+        if max(counts[x] for x in order[i:i + window]) >= thr_high:
+            return order[i]
     return None
-
-
-def _extend_edge(counts, order, edge, thr, max_gap):
-    """
-    从主体边缘 edge 往外（order 的前面方向）延伸：
-    只要外侧 max_gap 列之内还有列高 >= thr 的列，就把边缘推到那一列。
-    用来保留渐强 / 渐弱的弱音，又不会把远处孤立的杂音带进来。
-    """
-    idx = order.index(edge)
-    last, gap = edge, 0
-    for x in reversed(order[:idx]):
-        if counts[x] >= thr:
-            last, gap = x, 0
-        else:
-            gap += 1
-            if gap > max_gap:
-                break
-    return last
 
 
 def analyze_wave(img):
     """
     分析波形区截图（坐标相对截图左上角），返回 (结果字典, 错误信息)。
-    结果含：框的上下左右边缘、左右静音柱位置、音频左右端、左右各需拖动的像素 dx_l / dx_r
+    音频边缘：连续 EDGE_MIN_RUN 列 >= 低阈值，且边缘往里 EDGE_RISE_WINDOW 列内出现强音。
     """
     px = img.load()
     w, h = img.size
 
-    # 1) 框的上下边框：青绿色像素很多的行
+    # 1) 框的上下边框
     rows = [r for r in range(h)
             if sum(1 for x in range(w) if _is_border(px[x, r])) >= 150]
     if not rows or max(rows) - min(rows) < 40:
         return None, "没找到框的上下边框"
     top, bottom = min(rows), max(rows)
     xs = [x for x in range(w) if _is_border(px[x, top])]
-    fl, fr = min(xs), max(xs)          # 框左右边缘
-    ya, yb = top + 4, bottom - 3       # 框内部扫描的行范围
+    fl, fr = min(xs), max(xs)
+    ya, yb = top + 4, bottom - 3
 
-    # 2) 左右静音柱：框内靠近左右边缘的亮色竖线
+    # 2) 左右静音柱
     def bar_cols(a, b):
         return [x for x in range(a, b)
                 if sum(1 for y in range(ya, yb) if _is_bar(px[x, y])) >= cfg.BAR_MIN_HEIGHT]
 
-    # 静音柱距框边缘实测 14~18 像素，只在 8~30 像素范围内找，避免把波形峰值误认成静音柱
     lb = bar_cols(fl + 8, fl + 30)
     rb = bar_cols(fr - 30, fr - 8)
     if not lb or not rb:
         return None, f"没找到静音柱（左={lb}，右={rb}）"
-    bar_l, bar_r = min(lb), max(rb)   # 取离框边缘最近的那一列
-    skip = {x + d for x in lb + rb for d in (-1, 0, 1)}   # 柱子及其抗锯齿边缘不参与音频判断
+    bar_l, bar_r = min(lb), max(rb)
+    skip = {x + d for x in lb + rb for d in (-1, 0, 1)}
 
-    # 3) 逐列统计波形像素（播放头、静音柱、中线都不会被算进去）
+    # 3) 逐列统计波形像素
     cols = list(range(fl + 4, fr - 3))
     counts = {x: 0 if x in skip else sum(1 for y in range(ya, yb) if _is_wave(px[x, y]))
               for x in cols}
@@ -112,27 +100,25 @@ def analyze_wave(img):
     if peak < cfg.MIN_COLUMN_PIXELS:
         return None, "没检测到音频波形"
 
-    # 4) 按相对振幅找音频左右端：阈值 = 参考列高(百分位) × 比例
+    # 4) 低阈值找候选边缘，边缘附近必须连着强音
     ref = _reference_height(counts)
-    thr_l = max(cfg.MIN_COLUMN_PIXELS, ref * cfg.EDGE_AMP_RATIO_L)
-    thr_r = max(cfg.MIN_COLUMN_PIXELS, ref * cfg.EDGE_AMP_RATIO_R)
-    audio_l = _find_edge(counts, cols, thr_l)
-    audio_r = _find_edge(counts, cols[::-1], thr_r)
+    noise = _noise_level(counts)
+    thr_low = max(cfg.MIN_COLUMN_PIXELS, noise * cfg.NOISE_MULT, ref * cfg.EDGE_LOW_RATIO)
+    thr_high = max(thr_low + 1, ref * cfg.EDGE_HIGH_RATIO)
+    thr_l = thr_r = thr_low
+    audio_l = _find_edge_rise(counts, cols, thr_low, thr_high, cfg.EDGE_RISE_WINDOW)
+    audio_r = _find_edge_rise(counts, cols[::-1], thr_low, thr_high, cfg.EDGE_RISE_WINDOW)
     if audio_l is None or audio_r is None or audio_l >= audio_r:
-        return None, f"没找到有效音频边缘（最大列高={peak}，参考列高={ref}）"
-
-    # 往外延伸，保留渐强 / 渐弱的弱音
-    thr_tail = max(cfg.MIN_COLUMN_PIXELS, ref * cfg.EDGE_TAIL_RATIO)
-    audio_l = _extend_edge(counts, cols, audio_l, thr_tail, cfg.EDGE_TAIL_GAP)
-    audio_r = _extend_edge(counts, cols[::-1], audio_r, thr_tail, cfg.EDGE_TAIL_GAP)
+        return None, f"没找到有效音频边缘（最大列高={peak}，参考列高={ref}，底噪={noise}）"
 
     return {
         "top": top, "bottom": bottom, "fl": fl, "fr": fr,
         "bar_l": bar_l, "bar_r": bar_r,
         "audio_l": audio_l, "audio_r": audio_r,
-        "peak": peak, "ref": ref, "thr_l": thr_l, "thr_r": thr_r,
-        "dx_l": audio_l - (bar_l + cfg.BAR_GAP),   # 左静音柱需要右移（正）/ 左移（负）的像素
-        "dx_r": audio_r - (bar_r - cfg.BAR_GAP),   # 右静音柱需要右移（正）/ 左移（负）的像素
+        "peak": peak, "ref": ref, "noise": noise,
+        "thr_l": thr_l, "thr_r": thr_r, "thr_high": thr_high,
+        "dx_l": audio_l - (bar_l + cfg.BAR_GAP),
+        "dx_r": audio_r - (bar_r - cfg.BAR_GAP),
     }, ""
 
 
@@ -148,7 +134,7 @@ def _measure():
 
 
 def fit_silence_bars():
-    """识别音频真实起止 -> 拖动 -> 重新测量，直到左右静音柱都贴合音频（以静音柱位置为准）"""
+    """识别音频真实起止 -> 拖动 -> 重新测量，直到左右静音柱都贴合音频"""
     x0, y0 = cfg.SCAN_X0, cfg.SCAN_Y0
 
     for rnd in range(1, cfg.FIT_MAX_ROUNDS + 1):
@@ -162,11 +148,10 @@ def fit_silence_bars():
         print(f"📏 第{rnd}轮 框 {x0 + res['fl']}~{x0 + res['fr']}，"
               f"静音柱 {x0 + res['bar_l']} / {x0 + res['bar_r']}，"
               f"音频 {x0 + res['audio_l']}~{x0 + res['audio_r']}，"
-              f"最大列高 {res['peak']}，参考列高 {res['ref']}，"
-              f"阈值 {res['thr_l']:.1f}/{res['thr_r']:.1f}，"
+              f"最大列高 {res['peak']}，参考列高 {res['ref']}，底噪 {res['noise']}，"
+              f"低阈值 {res['thr_l']:.1f}，强音阈值 {res['thr_high']:.1f}，"
               f"左柱需移动 {dx_l}px，右柱需移动 {dx_r}px")
 
-        # 左右静音柱都已贴合：结束
         if abs(dx_l) <= cfg.FIT_TOLERANCE and abs(dx_r) <= cfg.FIT_TOLERANCE:
             print("✅ 静音柱已贴合音频")
             return
@@ -175,10 +160,8 @@ def fit_silence_bars():
 
         center_y = y0 + (res["top"] + res["bottom"]) // 2
         if cfg.FIT_GRAB == "bar":
-            # 直接抓静音柱本身
             grabs = ((x0 + res["bar_l"], dx_l), (x0 + res["bar_r"], dx_r))
         else:
-            # 抓框左右边缘（往框内偏 1 像素，避免点到框外）
             grabs = ((x0 + res["fl"] + 1, dx_l), (x0 + res["fr"] - 1, dx_r))
 
         with state.mouse_lock:
@@ -188,13 +171,10 @@ def fit_silence_bars():
                 if abs(dx) > cfg.FIT_MAX_DRAG:
                     print(f"⚠️ 偏差 {dx}px 过大，疑似识别异常，已跳过")
                     continue
-                # 无论拖动是否出错，都保证松开左键，避免鼠标一直处于按下状态
-                try:
-                    pyautogui.moveTo(grab_x, center_y)
-                    pyautogui.mouseDown()
-                    pyautogui.moveTo(grab_x + dx, center_y, duration=0.2)
-                finally:
-                    pyautogui.mouseUp()
+                pyautogui.moveTo(grab_x, center_y)
+                pyautogui.mouseDown()
+                pyautogui.moveTo(grab_x + dx, center_y, duration=0.2)
+                pyautogui.mouseUp()
                 time.sleep(0.1)
 
     print("⚠️ 静音柱贴合：达到最大轮数仍有偏差，请查看日志，必要时把 FIT_GRAB 改成 \"bar\"")

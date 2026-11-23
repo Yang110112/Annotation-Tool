@@ -17,7 +17,7 @@ WM_XBUTTONUP = 0x020C
 KEY_DOWN_MSGS = (0x0100, 0x0104)   # WM_KEYDOWN, WM_SYSKEYDOWN
 KEY_UP_MSGS = (0x0101, 0x0105)     # WM_KEYUP, WM_SYSKEYUP
 VK_ESCAPE = 0x1B
-VK_TAB = 0x09                      # Tab 键：固定用于切换倍数
+CTRL_VKS = (0xA2, 0xA3)            # 左 Ctrl / 右 Ctrl：单按一下用于切换倍速
 
 
 class HotkeyManager:
@@ -30,6 +30,8 @@ class HotkeyManager:
         self.held = set()             # 键盘按住状态，防止长按连续触发
         self.sup_mouse = set()        # 按下时被拦截的鼠标键，抬起时必须同样拦截
         self.sup_keys = set()         # 按下时被拦截的键盘键，抬起时必须同样拦截
+        self.ctrl_keys = set()        # 当前按住的 Ctrl 键
+        self.ctrl_clean = False       # 本次 Ctrl 按下期间，是否没有按过其他键 / 鼠标
         # 钩子一直挂着（录入按键也需要），是否触发由 self.enabled 控制
         self.mouse_listener = mouse.Listener(win32_event_filter=self.on_mouse)
         self.keyboard_listener = keyboard.Listener(win32_event_filter=self.on_key)
@@ -105,6 +107,10 @@ class HotkeyManager:
         else:
             return True
 
+        # Ctrl 按住期间有鼠标操作（点击 / 滚轮）：这次 Ctrl 不算"单按"
+        if self.ctrl_keys and kind in ("down", "wheel"):
+            self.ctrl_clean = False
+
         if self.recording:
             if kind in ("down", "wheel"):
                 code = codes[0]
@@ -158,6 +164,26 @@ class HotkeyManager:
                 self.finish_record({"type": "key", "code": vk, "name": self.key_name(data)})
             return True
 
+        # Ctrl 键：单按一下（按下 -> 松开，期间没按其他键）切换倍速
+        # 在标注页内才生效；不拦截 Ctrl，页面里的 Ctrl+C / Ctrl+A 等组合键不受影响
+        if vk in CTRL_VKS:
+            if down:
+                if not self.ctrl_keys:    # 第一次按下（长按的重复事件不重新判断）
+                    self.ctrl_clean = self.enabled and in_target_window(show=True)
+                self.ctrl_keys.add(vk)
+            else:
+                self.ctrl_keys.discard(vk)
+                if not self.ctrl_keys:    # 所有 Ctrl 都松开了
+                    was_clean = self.ctrl_clean
+                    self.ctrl_clean = False
+                    if was_clean and self.enabled and in_target_window():
+                        actions.start_speed("Ctrl")
+            return True
+
+        # Ctrl 按住期间按了别的键（组合键）：不算单按
+        if down and self.ctrl_keys:
+            self.ctrl_clean = False
+
         # 抬起：始终清除按住状态；按下时被拦截过的，抬起同样拦截
         if not down:
             self.held.discard(vk)
@@ -167,18 +193,6 @@ class HotkeyManager:
             return True
 
         if not self.enabled:
-            return True
-
-        # Tab 键：切换倍数（固定键，只在标注页内生效，其他程序里 Tab 正常使用）
-        if vk == VK_TAB:
-            if not in_target_window(show=True):
-                return True
-            if vk not in self.held:   # 防止长按连续触发
-                self.held.add(vk)
-                actions.start_speed("触发键")
-            if self.suppress:
-                self.sup_keys.add(vk)
-                self.keyboard_listener.suppress_event()
             return True
 
         action = self.match("key", (vk,))

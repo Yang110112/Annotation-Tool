@@ -16,7 +16,10 @@ SUPPRESS_WHEEL = True       # 仅在标注页窗口内生效；True：滚轮不�
 WHEEL_COOLDOWN = 0.8        # 滚一格会连续产生多个事件，冷却期内只触发一次
 
 # ====== 倍速 ======
-SPEED_INPUT_POS = (1473, 305)   # 倍速输入框坐标（"倍速：1.00"中数字所在位置）
+SPEED_INPUT_POS = (1473, 305)   # 倍速输入框坐标（"倍速：1.00"中数字所在位置，现已不用，保留）
+SPEED_UP_POS = (1516, 298)      # 加倍速按钮（每点一次 +0.25）
+SPEED_DOWN_POS = (1516, 312)    # 减倍速按钮（每点一次 -0.25）
+SPEED_STEP = 0.25               # 每点一次变化的倍速
 FAST_SPEED = "1.25"             # 第一次按 Tab 设置的倍速
 NORMAL_SPEED = "1"              # 再按一次 Tab 恢复的倍速
 # True：每次自动化后，把脚本记录的状态重置为"正常倍速"（换题后页面倍速会回到 1 倍时用）
@@ -45,15 +48,19 @@ FIT_DRY_RUN = False           # True：只检测并打印，不拖动
 SCAN_X0, SCAN_Y0 = 380, 150
 SCAN_W, SCAN_H = 1260, 125
 BAR_MIN_HEIGHT = 30           # 静音柱竖线至少多少像素高
-MIN_COLUMN_PIXELS = 3         # 一列里波形像素不少于多少个，才算"有音频"
+MIN_COLUMN_PIXELS = 2         # 一列里波形像素不少于多少个，才算"有音频"
 FIT_TOLERANCE = 3             # 偏差不超过这个像素数就不拖
 FIT_MAX_DRAG = 300            # 单次拖动超过这个像素数视为识别异常，不拖动
 BAR_GAP = 3                   # 贴合后，静音柱与音频最边缘之间保留的像素
-EDGE_AMP_RATIO_L = 0.2        # 左边缘：列高需达到"参考列高"的这个比例
-EDGE_AMP_RATIO_R = 0.2  
-EDGE_TAIL_RATIO = 0.05        # 新增：往外延伸时的低阈值（参考列高的比例）
-EDGE_TAIL_GAP = 6             # 新增：延伸时允许的最大间隔列数      # 右边缘：同上
-EDGE_REF_PERCENTILE = 90      # 新增：参考列高取有声列高度的第几百分位
-EDGE_MIN_RUN = 4              # 需要连续多少列都达标，才算音频边缘（过滤又窄又高的毛刺）
+
+EDGE_REF_PERCENTILE = 90      # 参考列高：取有声列高度的第几百分位（比取最大值稳定）
+NOISE_PERCENTILE = 20         # 底噪高度：取所有列高的第几百分位（越小越保守）
+NOISE_MULT = 1.3              # 列高需超过底噪的几倍才算音频
+EDGE_MIN_RUN = 5              # 需要连续多少列都达标，才算音频边缘（过滤又窄又高的毛刺）
+
+EDGE_LOW_RATIO = 0.05         # 低阈值：参考列高的比例（找候选边缘，越低越能保留弱起音）
+EDGE_HIGH_RATIO = 0.25        # 强音阈值：边缘附近必须出现这个高度的列才算真音频
+EDGE_RISE_WINDOW = 12         # 候选边缘往里多少列之内必须出现强音
+
 FIT_GRAB = "edge"             # 拖动时抓取的位置："edge" = 框左右边缘；"bar" = 静音柱本身
 FIT_MAX_ROUNDS = 3            # 最多测量并修正几轮（每轮拖完会重新截图检查静音柱是否贴合）
