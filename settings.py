@@ -17,10 +17,18 @@ MOUSE_NAMES = {
 }
 WHEEL_CODES = {"wheel_up", "wheel_down", "wheel_any"}
 
-# 默认按键：右键 = 自动化，滚轮 = 重听
+# 弹窗提醒的默认条数（界面可修改，会保存）
+DEFAULT_MILESTONE = 100
+
+# 所有可设置按键的功能（顺序即界面显示顺序）
+ACTIONS = ("auto", "replay", "speed")
+
+# 默认按键：右键 = 自动化，滚轮 = 重听，单按 Ctrl = 倍速切换
+# code 为 "ctrl" 表示"单按一下 Ctrl（按下后松开，期间没按其他键）"
 DEFAULT_BINDINGS = {
     "auto": {"type": "mouse", "code": "right", "name": MOUSE_NAMES["right"]},
     "replay": {"type": "mouse", "code": "wheel_any", "name": MOUSE_NAMES["wheel_any"]},
+    "speed": {"type": "key", "code": "ctrl", "name": "Ctrl（单按）"},
 }
 
 
@@ -31,23 +39,26 @@ def load_settings(default_keywords):
             cfg = json.load(f)
     except Exception:
         pass
+    try:
+        milestone = int(cfg.get("milestone", DEFAULT_MILESTONE))
+    except (TypeError, ValueError):
+        milestone = DEFAULT_MILESTONE
+    if not 1 <= milestone <= 99999:
+        milestone = DEFAULT_MILESTONE
     return {
-        "bindings": {
-            "auto": cfg.get("auto") or DEFAULT_BINDINGS["auto"],
-            "replay": cfg.get("replay") or DEFAULT_BINDINGS["replay"],
-        },
+        "milestone": milestone,
+        # 旧配置文件里没有 speed 字段时，自动使用默认值（Ctrl 单按），行为和旧版一致
+        "bindings": {a: cfg.get(a) or DEFAULT_BINDINGS[a] for a in ACTIONS},
         "keywords": cfg.get("keywords") or list(default_keywords),
         "suppress": bool(cfg.get("suppress", True)),
     }
 
 
-def save_settings(bindings, keywords, suppress):
-    cfg = {
-        "auto": bindings["auto"],
-        "replay": bindings["replay"],
-        "keywords": keywords,
-        "suppress": suppress,
-    }
+def save_settings(bindings, keywords, suppress, milestone=DEFAULT_MILESTONE):
+    cfg = {a: bindings[a] for a in ACTIONS}
+    cfg["keywords"] = keywords
+    cfg["suppress"] = suppress
+    cfg["milestone"] = milestone
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)

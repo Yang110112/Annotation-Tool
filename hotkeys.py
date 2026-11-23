@@ -5,7 +5,7 @@ import ctypes
 from pynput import keyboard, mouse
 
 import actions
-from settings import MOUSE_NAMES, WHEEL_CODES
+from settings import ACTIONS, MOUSE_NAMES, WHEEL_CODES
 from winutil import in_target_window, WM_MOUSEWHEEL
 
 # 鼠标 / 键盘消息常量
@@ -17,7 +17,8 @@ WM_XBUTTONUP = 0x020C
 KEY_DOWN_MSGS = (0x0100, 0x0104)   # WM_KEYDOWN, WM_SYSKEYDOWN
 KEY_UP_MSGS = (0x0101, 0x0105)     # WM_KEYUP, WM_SYSKEYUP
 VK_ESCAPE = 0x1B
-CTRL_VKS = (0xA2, 0xA3)            # 左 Ctrl / 右 Ctrl：单按一下用于切换倍速
+CTRL_VKS = (0xA2, 0xA3)            # 左 Ctrl / 右 Ctrl：单按一下作为一种特殊按键（code 为 "ctrl"）
+CTRL_BINDING = {"type": "key", "code": "ctrl", "name": "Ctrl（单按）"}
 
 
 class HotkeyManager:
@@ -26,7 +27,7 @@ class HotkeyManager:
         self.bindings = bindings
         self.suppress = suppress
         self.enabled = False          # 是否在监听
-        self.recording = None         # 正在录入哪个功能："auto" / "replay" / None
+        self.recording = None         # 正在录入哪个功能："auto" / "replay" / "speed" / None
         self.held = set()             # 键盘按住状态，防止长按连续触发
         self.sup_mouse = set()        # 按下时被拦截的鼠标键，抬起时必须同样拦截
         self.sup_keys = set()         # 按下时被拦截的键盘键，抬起时必须同样拦截
@@ -69,7 +70,7 @@ class HotkeyManager:
         return buf.value if n else f"VK_{data.vkCode}"
 
     def match(self, typ, codes):
-        for action in ("auto", "replay"):
+        for action in ACTIONS:
             b = self.bindings.get(action)
             if b and b["type"] == typ and b["code"] in codes:
                 return action
@@ -80,11 +81,13 @@ class HotkeyManager:
         self.recording = None
         self.q.put(("record", action, b))
 
-    def trigger(self, action, is_wheel):
+    def trigger(self, action, is_wheel, label="触发键"):
         if action == "auto":
-            actions.start_auto("触发键")
-        else:
-            actions.start_replay("触发键", is_wheel)
+            actions.start_auto(label)
+        elif action == "replay":
+            actions.start_replay(label, is_wheel)
+        elif action == "speed":
+            actions.start_speed(label)
 
     # ---------- 钩子回调 ----------
     def on_mouse(self, msg, data):
@@ -161,10 +164,14 @@ class HotkeyManager:
 
         if self.recording:
             if down:
-                self.finish_record({"type": "key", "code": vk, "name": self.key_name(data)})
+                if vk in CTRL_VKS:
+                    # 录入时按下 Ctrl：记为"Ctrl 单按"（左右 Ctrl 通用）
+                    self.finish_record(dict(CTRL_BINDING))
+                else:
+                    self.finish_record({"type": "key", "code": vk, "name": self.key_name(data)})
             return True
 
-        # Ctrl 键：单按一下（按下 -> 松开，期间没按其他键）切换倍速
+        # Ctrl 键：单按一下（按下 -> 松开，期间没按其他键）触发已绑定到 "Ctrl（单按）" 的功能
         # 在标注页内才生效；不拦截 Ctrl，页面里的 Ctrl+C / Ctrl+A 等组合键不受影响
         if vk in CTRL_VKS:
             if down:
@@ -177,7 +184,9 @@ class HotkeyManager:
                     was_clean = self.ctrl_clean
                     self.ctrl_clean = False
                     if was_clean and self.enabled and in_target_window():
-                        actions.start_speed("Ctrl")
+                        action = self.match("key", ("ctrl",))
+                        if action:
+                            self.trigger(action, False, "Ctrl")
             return True
 
         # Ctrl 按住期间按了别的键（组合键）：不算单按

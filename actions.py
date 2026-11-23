@@ -10,6 +10,37 @@ from fit_bars import fit_silence_bars
 from id_store import store
 from state import state
 
+# ====== 完成计数：每读到一个新编号算 1 条，每满 MILESTONE_EVERY 条提醒一次 ======
+MILESTONE_EVERY = 100   # 默认值；GUI 版会用界面里输入的条数覆盖它
+done_count = 0          # 本次运行已完成的条数（重启程序后从 0 重新数）
+on_milestone = None     # GUI 会把它设成回调函数：on_milestone(已完成条数)
+
+# ====== 功能开关（界面上可手动关闭，默认全部开启；每次启动都恢复开启）======
+features = {
+    "fit": True,        # 拉音频：让静音柱贴合音频
+    "paste": True,      # 复制粘贴文本：复制语句 -> 点转写框 -> 粘贴
+    "write_id": True,   # 把编号写入文本文件
+}
+
+
+def set_feature(name, value):
+    features[name] = bool(value)
+    if name == "write_id":
+        store.write_enabled = bool(value)
+
+
+def count_done():
+    """读到新编号后调用：计数 +1，满 MILESTONE_EVERY 条时通知界面弹窗"""
+    global done_count
+    done_count += 1
+    if done_count % MILESTONE_EVERY == 0:
+        print(f"🎉 已完成 {done_count} 条")
+        if on_milestone:
+            try:
+                on_milestone(done_count)
+            except Exception as e:
+                print("⚠️ 弹窗通知失败：", e)
+
 
 def init():
     """启动时调用一次：打印屏幕信息，创建/读取编号文件"""
@@ -28,7 +59,7 @@ def click(x, y):
 def cl():
     time.sleep(0.2)
     click(*cfg.REPLAY_POS)          # 选中语句（同时重听音频）
-    if cfg.FIT_ENABLED:
+    if features["fit"]:
         try:
             fit_silence_bars()      # 选中语句后，再让静音柱贴合音频
         except Exception as e:
@@ -38,13 +69,14 @@ def cl():
 
     # 复制 -> 点转写框 -> 粘贴 这一段必须连续完成，整体加锁，避免被重听打断
     with state.mouse_lock:
-        pyautogui.hotkey('ctrl', 'a')
-        pyautogui.hotkey('ctrl', 'c')
+        if features["paste"]:
+            pyautogui.hotkey('ctrl', 'a')
+            pyautogui.hotkey('ctrl', 'c')
 
-        pyautogui.click(cfg.TRANSCRIBE_BOX_POS[0], cfg.TRANSCRIBE_BOX_POS[1],
-                        button='left', duration=0.1)
-        pyautogui.hotkey('ctrl', 'a')
-        pyautogui.hotkey('ctrl', 'v')
+            pyautogui.click(cfg.TRANSCRIBE_BOX_POS[0], cfg.TRANSCRIBE_BOX_POS[1],
+                            button='left', duration=0.1)
+            pyautogui.hotkey('ctrl', 'a')
+            pyautogui.hotkey('ctrl', 'v')
         pyautogui.moveTo(cfg.PARK_POS[0], cfg.PARK_POS[1], duration=0.2)
 
     # 这几秒在锁外面，期间滚动滚轮可以立即重听
@@ -53,8 +85,12 @@ def cl():
 
 def run_task():
     try:
-        store.extract()   # 先读取当前页编号，再执行点击流程
-        cl()
+        is_new = store.extract()   # 先读取当前页编号（True = 新编号，False = 重复/没读到）
+        if is_new:
+            count_done()           # 读到新编号就立刻计数，满 100 条马上弹窗，不等后面的点击流程
+        else:
+            print("↩️ 该编号重复或未读到，不计入完成条数")
+        cl()                       # 再执行点击 / 粘贴流程
         if cfg.RESET_SPEED_ON_NEW_PAGE:
             state.speed_fast = False
     finally:

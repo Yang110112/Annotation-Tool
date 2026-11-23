@@ -9,8 +9,14 @@
     "code": "wheel_any",
     "name": "滚轮（上下均可）"
   },
+  "speed": {
+    "type": "key",
+    "code": "ctrl",
+    "name": "Ctrl（单按）"
+  },
   "keywords": [
     "单人转写标注"
   ],
-  "suppress": true
+  "suppress": true,
+  "milestone": 100
 }
